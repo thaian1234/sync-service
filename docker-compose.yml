@@ -1,0 +1,218 @@
+version: '3.8'
+
+networks:
+  sync-network:
+    driver: bridge
+
+services:
+  mysql-core:
+    image: mysql:8.0
+    container_name: mysql-core
+    restart: always
+    ports:
+      - "3308:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: core_db
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - ./databases/init-core.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-core-data:/var/lib/mysql
+    command: --binlog-format=ROW --enforce-gtid-consistency=ON --log-slave-updates=ON --gtid-mode=ON
+    networks:
+      - sync-network
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql-cms:
+    image: mysql:8.0
+    container_name: mysql-cms
+    restart: always
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: cms_db
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - ./databases/init-cms.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-cms-data:/var/lib/mysql
+    networks:
+      - sync-network
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: zookeeper
+    restart: always
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - sync-network
+    healthcheck:
+      test: echo "ruok" | nc localhost 2181 | grep imok
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka
+    restart: always
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    networks:
+      - sync-network
+    healthcheck:
+      test: kafka-topics --bootstrap-server localhost:9092 --list
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka-connect:
+    image: debezium/connect:2.1.4.Final
+    container_name: kafka-connect
+    restart: always
+    ports:
+      - "8083:8083"
+    depends_on:
+      - kafka
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: "connect-cluster"
+      CONFIG_STORAGE_TOPIC: "connect-configs"
+      OFFSET_STORAGE_TOPIC: "connect-offsets"
+      STATUS_STORAGE_TOPIC: "connect-status"
+      KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+    networks:
+      - sync-network
+    healthcheck:
+      test: curl -f http://localhost:8083/
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      - kafka
+      - kafka-connect
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect-cluster
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+    networks:
+      - sync-network
+    healthcheck:
+      test: curl -f http://localhost:8080/
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  core-service:
+    build: ./core-service
+    container_name: core-service
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      mysql-core:
+        condition: service_healthy
+    networks:
+      - sync-network
+    environment:
+      DATABASE_HOST: mysql-core
+      DATABASE_PORT: 3306
+      DATABASE_USER: user
+      DATABASE_PASSWORD: password
+      DATABASE_NAME: core_db
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-cache
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    networks:
+      - sync-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  cms-service:
+    build: ./cms-service
+    container_name: cms-service
+    restart: always
+    ports:
+      - "3002:3002"
+    depends_on:
+      mysql-cms:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sync-network
+    environment:
+      DATABASE_HOST: mysql-cms
+      DATABASE_PORT: 3306
+      DATABASE_USER: user
+      DATABASE_PASSWORD: password
+      DATABASE_NAME: cms_db
+      KAFKA_BROKER: kafka:9092
+      # Redis configuration for event idempotency cache
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_TTL: 300
+      # Optimized connection pool (reduced with Redis cache)
+      DB_CONNECTION_POOL_SIZE: 5
+
+volumes:
+  mysql-core-data:
+  mysql-cms-data:
+  redis-data:

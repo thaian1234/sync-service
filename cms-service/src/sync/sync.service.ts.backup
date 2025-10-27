@@ -1,0 +1,232 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { CmsProduct } from '../database/entities/cms-product.entity';
+import { CmsCustomer } from '../database/entities/cms-customer.entity';
+import { CmsOrder } from '../database/entities/cms-order.entity';
+import { ProcessedEvent } from '../database/entities/processed-event.entity';
+import { EVENT_TYPE } from '../kafka/enums';
+import { CustomerChangedEvent } from '../kafka/events/customer-changed.event';
+import { ProductChangedEvent } from '../kafka/events/product-changed.event';
+import { OrderChangedEvent } from '../kafka/events/order-changed.event';
+
+@Injectable()
+export class SyncService {
+  private readonly logger = new Logger(SyncService.name);
+
+  constructor(
+    @InjectRepository(CmsProduct)
+    private cmsProductRepository: Repository<CmsProduct>,
+    @InjectRepository(CmsCustomer)
+    private cmsCustomerRepository: Repository<CmsCustomer>,
+    @InjectRepository(CmsOrder)
+    private cmsOrderRepository: Repository<CmsOrder>,
+    @InjectRepository(ProcessedEvent)
+    private processedEventRepository: Repository<ProcessedEvent>,
+  ) {}
+
+  /**
+   * Check if event has already been processed (idempotency check)
+   */
+  private async isEventProcessed(eventId: string): Promise<boolean> {
+    const event = await this.processedEventRepository.findOne({
+      where: { eventId },
+    });
+    return !!event;
+  }
+
+  /**
+   * Mark event as processed
+   */
+  private async markEventProcessed(
+    eventId: string,
+    table: string,
+    recordId: number,
+    operation: string,
+  ): Promise<void> {
+    const event = this.processedEventRepository.create({
+      eventId,
+      tableName: table,
+      recordId,
+      operation,
+    });
+    await this.processedEventRepository.save(event);
+  }
+
+  /**
+   * Sync a single customer event
+   */
+  async syncCustomerEvent(event: CustomerChangedEvent): Promise<void> {
+    // Check idempotency
+    if (await this.isEventProcessed(event.eventId)) {
+      this.logger.debug(`Customer event ${event.eventId} already processed, skipping`);
+      return;
+    }
+
+    const customerId = event.getCustomerId();
+
+    try {
+      switch (event.type) {
+        case EVENT_TYPE.CREATED:
+        case EVENT_TYPE.SNAPSHOT:
+          await this.cmsCustomerRepository.upsert(
+            {
+              coreCustomerId: customerId,
+              name: event.data.name,
+              email: event.data.email,
+              phone: event.data.phone,
+              syncedAt: new Date(),
+            },
+            ['coreCustomerId'],
+          );
+          break;
+
+        case EVENT_TYPE.UPDATED:
+          await this.cmsCustomerRepository.update(
+            { coreCustomerId: customerId },
+            {
+              name: event.data.name,
+              email: event.data.email,
+              phone: event.data.phone,
+              syncedAt: new Date(),
+            },
+          );
+          break;
+
+        case EVENT_TYPE.DELETED:
+          await this.cmsCustomerRepository.delete({ coreCustomerId: customerId });
+          break;
+
+        default:
+          this.logger.warn(`Unknown event type: ${event.type} for customer event ${event.eventId}`);
+          return;
+      }
+
+      await this.markEventProcessed(event.eventId, event.source, customerId, event.type);
+      this.logger.log(`Successfully synced customer event: ${event.eventId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync customer event ${event.eventId}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Sync a single product event
+   */
+  async syncProductEvent(event: ProductChangedEvent): Promise<void> {
+    // Check idempotency
+    if (await this.isEventProcessed(event.eventId)) {
+      this.logger.debug(`Product event ${event.eventId} already processed, skipping`);
+      return;
+    }
+
+    const productId = event.getProductId();
+
+    try {
+      switch (event.type) {
+        case EVENT_TYPE.CREATED:
+        case EVENT_TYPE.SNAPSHOT:
+          await this.cmsProductRepository.upsert(
+            {
+              coreProductId: productId,
+              name: event.data.name,
+              description: event.data.description,
+              price: event.data.price,
+              stock: event.data.stock,
+              category: event.data.category,
+              status: event.data.status,
+              syncedAt: new Date(),
+            },
+            ['coreProductId'],
+          );
+          break;
+
+        case EVENT_TYPE.UPDATED:
+          await this.cmsProductRepository.update(
+            { coreProductId: productId },
+            {
+              name: event.data.name,
+              description: event.data.description,
+              price: event.data.price,
+              stock: event.data.stock,
+              category: event.data.category,
+              status: event.data.status,
+              syncedAt: new Date(),
+            },
+          );
+          break;
+
+        case EVENT_TYPE.DELETED:
+          await this.cmsProductRepository.delete({ coreProductId: productId });
+          break;
+
+        default:
+          this.logger.warn(`Unknown event type: ${event.type} for product event ${event.eventId}`);
+          return;
+      }
+
+      await this.markEventProcessed(event.eventId, event.source, productId, event.type);
+      this.logger.log(`Successfully synced product event: ${event.eventId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync product event ${event.eventId}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Sync a single order event
+   */
+  async syncOrderEvent(event: OrderChangedEvent): Promise<void> {
+    // Check idempotency
+    if (await this.isEventProcessed(event.eventId)) {
+      this.logger.debug(`Order event ${event.eventId} already processed, skipping`);
+      return;
+    }
+
+    const orderId = event.getOrderId();
+
+    try {
+      switch (event.type) {
+        case EVENT_TYPE.CREATED:
+        case EVENT_TYPE.SNAPSHOT:
+          await this.cmsOrderRepository.upsert(
+            {
+              coreOrderId: orderId,
+              customerId: event.data.customerId,
+              total: event.data.total,
+              status: event.data.status,
+              syncedAt: new Date(),
+            },
+            ['coreOrderId'],
+          );
+          break;
+
+        case EVENT_TYPE.UPDATED:
+          await this.cmsOrderRepository.update(
+            { coreOrderId: orderId },
+            {
+              customerId: event.data.customerId,
+              total: event.data.total,
+              status: event.data.status,
+              syncedAt: new Date(),
+            },
+          );
+          break;
+
+        case EVENT_TYPE.DELETED:
+          await this.cmsOrderRepository.delete({ coreOrderId: orderId });
+          break;
+
+        default:
+          this.logger.warn(`Unknown event type: ${event.type} for order event ${event.eventId}`);
+          return;
+      }
+
+      await this.markEventProcessed(event.eventId, event.source, orderId, event.type);
+      this.logger.log(`Successfully synced order event: ${event.eventId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync order event ${event.eventId}`, error.stack);
+      throw error;
+    }
+  }
+}

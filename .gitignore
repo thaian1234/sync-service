@@ -1,0 +1,32 @@
+# Environment files - NEVER commit these
+.env
+.env.dev
+.env.prod
+.env.test
+.env.local
+.env*.local
+
+# Docker volumes and data
+mysql-core-data/
+mysql-cms-data/
+redis-data/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node modules
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

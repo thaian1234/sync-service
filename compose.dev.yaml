@@ -1,0 +1,106 @@
+# compose.override.dev.yaml
+# Development environment - includes ALL services
+services:
+  mysql-core:
+    image: mysql:8.0
+    container_name: mysql-core
+    restart: always
+    ports:
+      - "${MYSQL_CORE_PORT}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_CORE_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./databases/init-core.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-core-data:/var/lib/mysql
+    command: --binlog-format=ROW --enforce-gtid-consistency=ON --log-slave-updates=ON --gtid-mode=ON
+    networks:
+      - sync-network
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql-cms:
+    image: mysql:8.0
+    container_name: mysql-cms
+    restart: always
+    ports:
+      - "${MYSQL_CMS_PORT}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_CMS_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./databases/init-cms.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-cms-data:/var/lib/mysql
+    networks:
+      - sync-network
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  core-service:
+    build: ./core-service
+    container_name: core-service
+    restart: always
+    ports:
+      - "${CORE_SERVICE_PORT}:3000"
+    depends_on:
+      mysql-core:
+        condition: service_healthy
+    networks:
+      - sync-network
+    env_file:
+      - ./core-service/.env.docker
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-cache
+    restart: always
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis-data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory ${REDIS_MAX_MEMORY}
+      --maxmemory-policy allkeys-lru
+    networks:
+      - sync-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  cms-service:
+    build: ./cms-service
+    container_name: cms-service
+    restart: always
+    ports:
+      - "${CMS_SERVICE_PORT}:3002"
+    depends_on:
+      mysql-cms:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sync-network
+    env_file:
+      - ./cms-service/.env.docker
+
+volumes:
+  mysql-core-data:
+  mysql-cms-data:
+  redis-data:

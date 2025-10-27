@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker ps:*)",
+      "Bash(curl:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker restart:*)",
+      "Bash(docker exec:*)",
+      "Bash(dir:*)",
+      "Bash(docker-compose build:*)",
+      "Bash(docker-compose restart:*)",
+      "Bash(npm install:*)",
+      "Bash(docker images:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose rm:*)",
+      "Bash(npm run build:*)",
+      "Bash(timeout 10 docker logs:*)",
+      "Bash(findstr:*)",
+      "Bash(ls -la \"d:\\DDV\\sync\\cms-service\\src\\kafka\\controllers\"\" 2>/dev/null | wc -l && ls -la \"d:DDVsynccms-servicesrckafkadecorators\"\")",
+      "Bash(move:*)",
+      "Bash(make help:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

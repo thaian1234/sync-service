@@ -1,0 +1,8 @@
+# compose.override.prod.yaml
+# Production environment - Kafka infrastructure only
+# Services: zookeeper, kafka, kafka-connect, kafka-ui
+# Note: Other services (MySQL, Redis, application services) are expected to be external
+
+# No additional services defined - production only uses base services from compose.yaml
+# This file exists to explicitly document production configuration
+services: {}

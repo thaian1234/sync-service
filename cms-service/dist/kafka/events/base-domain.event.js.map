@@ -1,0 +1,1 @@
+{"version":3,"file":"base-domain.event.js","sourceRoot":"","sources":["../../../src/kafka/events/base-domain.event.ts"],"names":[],"mappings":";;;AAGA,kCAAiD;AAA7B,mGAAA,UAAU,OAAA;AAE9B,MAAsB,eAAe;IAmCnC,YAAY,OAAoC;QAC9C,MAAM,CAAC,MAAM,CAAC,IAAI,EAAE,OAAO,CAAC,CAAC;IAC/B,CAAC;CACF;AAtCD,0CAsCC"}
